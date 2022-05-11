@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Usage: helmfilenv install <version>
+# Summary: Install the specified version of helm
+
+[ -n "${HELMFILENV_DEBUG}" ] && set -x
+source ${HELMFILENV_ROOT}/libexec/helpers.sh
+
+[ "${#}" -gt 1 ] && error_and_die "usage: helmfilenv install [<version>]"
+
+declare version
+
+if [ -z "${1}" ]; then
+  version_file="$(helmfilenv-version-file)"
+  if [ "${version_file}" != "${HELMFILENV_ROOT}/version" ]; then
+    version="$(cat ${version_file} || true)"
+  fi
+else
+  version="${1}"
+fi
+
+## helmfilenv install --list
+HELMFILE_REPO='https://api.github.com/repos/roboll/helmfile/releases'
+test "$1" == "--list" -o "$1" == "-l" && {
+  eval which {wget,curl,jq} &>/dev/null || { echo Please install wget curl jq ; exit 0; }
+  next="${HELMFILE_REPO}?simple=yes&per_page=100&page="
+  page="1"
+  while true; do
+    versions=$(wget -qO- "${next}${page}" | jq -r '.[].tag_name')
+    echo $versions
+    export next=$(curl -sSLIvk "${next}${page}" 2>&1 | grep -m1 link | sed 's|.*page=\(.*\)>;|\1|g'|xargs -n1 )
+    echo $next
+    page=$(cut -d' ' -f1 <<<$next)
+    grep -q last <<<${next} && break
+  done
+  exit 0
+}
+
+dst_path="${HELMFILENV_ROOT}/versions/${version##v}/bin"
+if [ -f "${dst_path}/helmfile" ]; then
+  echo "helmfile ${version##v} is already installed"
+  exit 0
+fi
+
+info "Installing helmfile ${version##v}"
+mkdir -p "${dst_path}" || error_and_die "Failed to make directory ${dst_path}"
+
+wget -qO ${dst_path}/helmfile https://github.com/roboll/helmfile/releases/download/v${version##v}/helmfile_$(uname -s)_$(uname -m | sed 's/x86_64/amd64/g') >&2 || error_and_die "Install failed"
+chmod +x ${dst_path}/helmfile
+
+info "Installation of helmfile ${version##v} successful"
